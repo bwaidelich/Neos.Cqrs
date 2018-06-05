@@ -56,6 +56,17 @@ final class EventStore
 
     /**
      * @param EventStreamFilterInterface $filter
+     * @return EventAndRawEvent
+     * @throws EventStreamNotFoundException
+     */
+    public function getFirst(EventStreamFilterInterface $filter): EventAndRawEvent
+    {
+        $eventStream = $this->get($filter);
+        return $eventStream->current();
+    }
+
+    /**
+     * @param EventStreamFilterInterface $filter
      * @return int
      */
     public function getStreamVersion(EventStreamFilterInterface $filter): int
