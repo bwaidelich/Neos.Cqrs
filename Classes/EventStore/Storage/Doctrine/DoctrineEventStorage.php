@@ -219,6 +219,10 @@ class DoctrineEventStorage implements EventStorageInterface
             $query->andWhere('sequencenumber >= :minimumSequenceNumber');
             $query->setParameter('minimumSequenceNumber', $filterValues[EventStreamFilterInterface::FILTER_MINIMUM_SEQUENCE_NUMBER]);
         }
+        if (array_key_exists(EventStreamFilterInterface::FILTER_MAXIMUM_SEQUENCE_NUMBER, $filterValues)) {
+            $query->andWhere('sequencenumber <= :maximumSequenceNumber');
+            $query->setParameter('maximumSequenceNumber', $filterValues[EventStreamFilterInterface::FILTER_MAXIMUM_SEQUENCE_NUMBER]);
+        }
         if (array_key_exists(EventStreamFilterInterface::FILTER_EVENT_IDENTIFIER, $filterValues)) {
             $query->andWhere('id = :eventIdentifier');
             $query->setParameter('eventIdentifier', $filterValues[EventStreamFilterInterface::FILTER_EVENT_IDENTIFIER]);
