@@ -18,7 +18,6 @@ use Neos\EventSourcing\EventStore\EventStoreManager;
 use Neos\EventSourcing\EventStore\Exception\EventStreamNotFoundException;
 use Neos\EventSourcing\EventStore\Stream\Filter\EventTypesFilter;
 use Neos\Flow\Annotations as Flow;
-use Neos\Cache\Frontend\VariableFrontend;
 use Neos\Flow\ObjectManagement\ObjectManagerInterface;
 use Neos\Flow\Reflection\ClassReflection;
 use Neos\Flow\Reflection\ReflectionService;
@@ -48,12 +47,6 @@ class ProjectionManager
      * @var EventListenerLocator
      */
     protected $eventListenerLocator;
-
-    /**
-     * @Flow\Inject
-     * @var VariableFrontend
-     */
-    protected $projectionCache;
 
     /**
      * @Flow\Inject
