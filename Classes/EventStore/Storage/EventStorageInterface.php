@@ -12,10 +12,10 @@ namespace Neos\EventSourcing\EventStore\Storage;
  */
 
 use Neos\Error\Messages\Result;
-use Neos\EventSourcing\EventStore\EventStream;
-use Neos\EventSourcing\EventStore\EventStreamFilterInterface;
 use Neos\EventSourcing\EventStore\ExpectedVersion;
 use Neos\EventSourcing\EventStore\RawEvent;
+use Neos\EventSourcing\EventStore\Stream\EventStream;
+use Neos\EventSourcing\EventStore\Stream\Filter\EventStreamFilterInterface;
 use Neos\EventSourcing\EventStore\WritableEvents;
 
 /**

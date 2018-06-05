@@ -16,9 +16,9 @@ use Neos\EventSourcing\EventListener\ActsBeforeInvokingEventListenerMethodsInter
 use Neos\EventSourcing\EventListener\AsynchronousEventListenerInterface;
 use Neos\EventSourcing\EventListener\EventListenerLocator;
 use Neos\EventSourcing\EventStore\EventStoreManager;
-use Neos\EventSourcing\EventStore\EventTypesFilter;
 use Neos\EventSourcing\EventStore\Exception\EventStreamNotFoundException;
 use Neos\EventSourcing\EventStore\ExpectedVersion;
+use Neos\EventSourcing\EventStore\Stream\Filter\EventTypesFilter;
 use Neos\EventSourcing\EventStore\WritableEvent;
 use Neos\EventSourcing\EventStore\WritableEvents;
 use Neos\EventSourcing\Property\AllowAllPropertiesPropertyMappingConfiguration;

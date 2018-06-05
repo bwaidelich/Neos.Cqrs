@@ -1,5 +1,5 @@
 <?php
-namespace Neos\EventSourcing\EventStore;
+namespace Neos\EventSourcing\EventStore\Stream;
 
 /*
  * This file is part of the Neos.EventSourcing package.
@@ -12,6 +12,8 @@ namespace Neos\EventSourcing\EventStore;
  */
 
 use Neos\EventSourcing\Event\EventTypeResolver;
+use Neos\EventSourcing\EventStore\EventAndRawEvent;
+use Neos\EventSourcing\EventStore\RawEvent;
 use Neos\EventSourcing\Property\AllowAllPropertiesPropertyMappingConfiguration;
 use Neos\Flow\Annotations as Flow;
 use Neos\Flow\Property\PropertyMapper;

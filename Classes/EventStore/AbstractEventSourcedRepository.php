@@ -15,6 +15,8 @@ use Neos\EventSourcing\Domain\EventSourcedAggregateRootInterface;
 use Neos\EventSourcing\Domain\Exception\AggregateRootNotFoundException;
 use Neos\EventSourcing\Domain\RepositoryInterface;
 use Neos\EventSourcing\Event\EventPublisher;
+use Neos\EventSourcing\EventStore\Stream\Filter\StreamNameFilter;
+use Neos\EventSourcing\EventStore\Stream\StreamNameResolver;
 use Neos\Flow\Annotations as Flow;
 
 /**

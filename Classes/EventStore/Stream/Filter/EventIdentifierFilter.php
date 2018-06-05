@@ -1,5 +1,5 @@
 <?php
-namespace Neos\EventSourcing\EventStore;
+namespace Neos\EventSourcing\EventStore\Stream\Filter;
 
 /*
  * This file is part of the Neos.EventSourcing package.
@@ -14,28 +14,27 @@ namespace Neos\EventSourcing\EventStore;
 use Neos\EventSourcing\Exception;
 
 /**
- * Stream name filter (exact name)
+ * An EventStream filter matching single events by their identifier
  */
-class StreamNameFilter implements EventStreamFilterInterface
+class EventIdentifierFilter implements EventStreamFilterInterface
 {
     /**
      * @var string
      */
-    private $streamName;
+    private $eventIdentifier;
 
     /**
-     * StreamNameFilter constructor.
+     * EventIdentifierFilter constructor.
      *
-     * @param string $streamName
+     * @param string $eventIdentifier
      * @throws Exception
      */
-    public function __construct(string $streamName)
+    public function __construct(string $eventIdentifier)
     {
-        $streamName = trim($streamName);
-        if ($streamName === '') {
-            throw new Exception('Empty stream filter provided', 1478299970);
+        if (empty($eventIdentifier)) {
+            throw new Exception('No event identifier filter specified', 1513329147);
         }
-        $this->streamName = $streamName;
+        $this->eventIdentifier = $eventIdentifier;
     }
 
     /**
@@ -44,7 +43,7 @@ class StreamNameFilter implements EventStreamFilterInterface
     public function getFilterValues(): array
     {
         return [
-            self::FILTER_STREAM_NAME => $this->streamName,
+            self::FILTER_EVENT_IDENTIFIER => $this->eventIdentifier,
         ];
     }
 
@@ -55,8 +54,8 @@ class StreamNameFilter implements EventStreamFilterInterface
     public function getFilterValue(string $name)
     {
         switch ($name) {
-            case self::FILTER_STREAM_NAME:
-                return $this->streamName;
+            case self::FILTER_EVENT_IDENTIFIER:
+                return $this->eventIdentifier;
             break;
         }
     }

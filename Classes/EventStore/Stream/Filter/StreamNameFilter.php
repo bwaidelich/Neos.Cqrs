@@ -1,5 +1,5 @@
 <?php
-namespace Neos\EventSourcing\EventStore;
+namespace Neos\EventSourcing\EventStore\Stream\Filter;
 
 /*
  * This file is part of the Neos.EventSourcing package.
@@ -14,28 +14,28 @@ namespace Neos\EventSourcing\EventStore;
 use Neos\EventSourcing\Exception;
 
 /**
- * Stream name prefix filter
+ * Stream name filter (exact name)
  */
-class StreamNamePrefixFilter implements EventStreamFilterInterface
+class StreamNameFilter implements EventStreamFilterInterface
 {
     /**
      * @var string
      */
-    private $streamNamePrefix;
+    private $streamName;
 
     /**
-     * StreamNamePrefixFilter constructor.
+     * StreamNameFilter constructor.
      *
-     * @param string $streamNamePrefix
+     * @param string $streamName
      * @throws Exception
      */
-    public function __construct(string $streamNamePrefix)
+    public function __construct(string $streamName)
     {
-        $streamNamePrefix = trim($streamNamePrefix);
-        if ($streamNamePrefix === '') {
-            throw new Exception('Empty stream name prefix filter provided', 1506517687);
+        $streamName = trim($streamName);
+        if ($streamName === '') {
+            throw new Exception('Empty stream filter provided', 1478299970);
         }
-        $this->streamNamePrefix = $streamNamePrefix;
+        $this->streamName = $streamName;
     }
 
     /**
@@ -44,7 +44,7 @@ class StreamNamePrefixFilter implements EventStreamFilterInterface
     public function getFilterValues(): array
     {
         return [
-            self::FILTER_STREAM_NAME_PREFIX => $this->streamNamePrefix,
+            self::FILTER_STREAM_NAME => $this->streamName,
         ];
     }
 
@@ -55,8 +55,8 @@ class StreamNamePrefixFilter implements EventStreamFilterInterface
     public function getFilterValue(string $name)
     {
         switch ($name) {
-            case self::FILTER_STREAM_NAME_PREFIX:
-                return $this->streamNamePrefix;
+            case self::FILTER_STREAM_NAME:
+                return $this->streamName;
             break;
         }
     }

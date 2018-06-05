@@ -1,5 +1,5 @@
 <?php
-namespace Neos\EventSourcing\EventStore;
+namespace Neos\EventSourcing\EventStore\Stream\Filter;
 
 /*
  * This file is part of the Neos.EventSourcing package.
@@ -14,27 +14,28 @@ namespace Neos\EventSourcing\EventStore;
 use Neos\EventSourcing\Exception;
 
 /**
- * An EventStream filter matching single events by their identifier
+ * Stream name prefix filter
  */
-class EventIdentifierFilter implements EventStreamFilterInterface
+class StreamNamePrefixFilter implements EventStreamFilterInterface
 {
     /**
      * @var string
      */
-    private $eventIdentifier;
+    private $streamNamePrefix;
 
     /**
-     * EventIdentifierFilter constructor.
+     * StreamNamePrefixFilter constructor.
      *
-     * @param string $eventIdentifier
+     * @param string $streamNamePrefix
      * @throws Exception
      */
-    public function __construct(string $eventIdentifier)
+    public function __construct(string $streamNamePrefix)
     {
-        if (empty($eventIdentifier)) {
-            throw new Exception('No event identifier filter specified', 1513329147);
+        $streamNamePrefix = trim($streamNamePrefix);
+        if ($streamNamePrefix === '') {
+            throw new Exception('Empty stream name prefix filter provided', 1506517687);
         }
-        $this->eventIdentifier = $eventIdentifier;
+        $this->streamNamePrefix = $streamNamePrefix;
     }
 
     /**
@@ -43,7 +44,7 @@ class EventIdentifierFilter implements EventStreamFilterInterface
     public function getFilterValues(): array
     {
         return [
-            self::FILTER_EVENT_IDENTIFIER => $this->eventIdentifier,
+            self::FILTER_STREAM_NAME_PREFIX => $this->streamNamePrefix,
         ];
     }
 
@@ -54,8 +55,8 @@ class EventIdentifierFilter implements EventStreamFilterInterface
     public function getFilterValue(string $name)
     {
         switch ($name) {
-            case self::FILTER_EVENT_IDENTIFIER:
-                return $this->eventIdentifier;
+            case self::FILTER_STREAM_NAME_PREFIX:
+                return $this->streamNamePrefix;
             break;
         }
     }

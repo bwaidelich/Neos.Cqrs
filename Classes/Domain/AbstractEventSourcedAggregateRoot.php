@@ -11,7 +11,7 @@ namespace Neos\EventSourcing\Domain;
  * source code.
  */
 
-use Neos\EventSourcing\EventStore\EventStream;
+use Neos\EventSourcing\EventStore\Stream\EventStream;
 
 /**
  * Base implementation for an event-sourced aggregate root

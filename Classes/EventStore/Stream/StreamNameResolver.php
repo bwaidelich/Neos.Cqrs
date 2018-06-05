@@ -1,5 +1,5 @@
 <?php
-namespace Neos\EventSourcing\EventStore;
+namespace Neos\EventSourcing\EventStore\Stream;
 
 /*
  * This file is part of the Neos.EventSourcing package.

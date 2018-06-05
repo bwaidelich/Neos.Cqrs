@@ -1,5 +1,5 @@
 <?php
-namespace Neos\EventSourcing\EventStore;
+namespace Neos\EventSourcing\EventStore\Stream\Filter;
 
 /*
  * This file is part of the Neos.EventSourcing package.
@@ -32,6 +32,11 @@ interface EventStreamFilterInterface
      * integer with the minimum sequence number to be matched
      */
     const FILTER_MINIMUM_SEQUENCE_NUMBER = 'minimumSequenceNumber';
+
+    /**
+     * integer with the maximum sequence number to be matched
+     */
+    const FILTER_MAXIMUM_SEQUENCE_NUMBER = 'maximumSequenceNumber';
 
     /**
      * string representing the events identifier that has to match
