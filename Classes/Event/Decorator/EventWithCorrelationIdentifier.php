@@ -64,6 +64,14 @@ final class EventWithCorrelationIdentifier implements EventWithMetadataInterface
     }
 
     /**
+     * @return string
+     */
+    public function getCorrelationIdentifier(): string
+    {
+        return $this->metadata['correlationIdentifier'];
+    }
+
+    /**
      * @return array
      */
     public function getMetadata(): array

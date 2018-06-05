@@ -64,6 +64,14 @@ final class EventWithCausationIdentifier implements EventWithMetadataInterface
     }
 
     /**
+     * @return string
+     */
+    public function getCausationIdentifier(): string
+    {
+        return $this->metadata['causationIdentifier'];
+    }
+
+    /**
      * @return array
      */
     public function getMetadata(): array
