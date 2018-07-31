@@ -404,8 +404,7 @@ class Organization
 }
 ```
 
-Read Models currently need to be annotated with `@Flow\Entity`. At a later point it is planned to introduce a specific
-annotation `@CQRS\ReadModel` for that, but that requires a core change in Flow.
+Read Models currently need to be annotated with `@Flow\Entity`.
 
 It is best practice to manually set the database table name via the `@ORM\Table` annotation.
 
