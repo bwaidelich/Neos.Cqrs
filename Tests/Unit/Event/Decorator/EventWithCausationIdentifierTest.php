@@ -5,11 +5,12 @@ use Neos\EventSourcing\Event\Decorator\EventWithCausationIdentifier;
 use Neos\EventSourcing\Event\Decorator\EventWithMetadataInterface;
 use Neos\EventSourcing\Event\EventInterface;
 use Neos\Flow\Tests\UnitTestCase;
+use PHPUnit\Framework\MockObject\MockObject;
 
 class EventWithCausationIdentifierTest extends UnitTestCase
 {
     /**
-     * @var EventInterface|\PHPUnit_Framework_MockObject_MockObject
+     * @var EventInterface|MockObject
      */
     private $mockEvent;
 
@@ -62,7 +63,7 @@ class EventWithCausationIdentifierTest extends UnitTestCase
     public function metadataIsMergedWhenNestingEventsWithMetadata()
     {
         $someMetadata = ['foo' => ['bar' => 'Baz', 'foos' => 'bars'], 'causationIdentifier' => 'existing-causation-id', 'correlationIdentifier' => 'existing-causation-id'];
-        /** @var EventWithMetadataInterface|\PHPUnit_Framework_MockObject_MockObject $eventWithMetadata */
+        /** @var EventWithMetadataInterface|MockObject $eventWithMetadata */
         $eventWithMetadata = $this->getMockBuilder(EventWithMetadataInterface::class)->getMock();
         $eventWithMetadata->expects($this->any())->method('getMetadata')->will($this->returnValue($someMetadata));
 

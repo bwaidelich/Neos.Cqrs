@@ -4,11 +4,12 @@ namespace Neos\EventSourcing\Tests\Unit\Event\Decorator;
 use Neos\EventSourcing\Event\Decorator\EventWithMetadata;
 use Neos\EventSourcing\Event\EventInterface;
 use Neos\Flow\Tests\UnitTestCase;
+use PHPUnit\Framework\MockObject\MockObject;
 
 class EventWithMetadataTest extends UnitTestCase
 {
     /**
-     * @var EventInterface|\PHPUnit_Framework_MockObject_MockObject
+     * @var EventInterface|MockObject
      */
     private $mockEvent;
 

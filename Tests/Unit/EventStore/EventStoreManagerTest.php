@@ -6,7 +6,7 @@ use Neos\EventSourcing\EventStore\EventStoreManager;
 use Neos\EventSourcing\EventStore\Storage\EventStorageInterface;
 use Neos\Flow\ObjectManagement\ObjectManagerInterface;
 use Neos\Flow\Tests\UnitTestCase;
-use Neos\Utility\ObjectAccess;
+use PHPUnit\Framework\MockObject\MockObject;
 
 class EventStoreManagerTest extends UnitTestCase
 {
@@ -17,17 +17,17 @@ class EventStoreManagerTest extends UnitTestCase
     private $eventStoreManager;
 
     /**
-     * @var EventStorageInterface|\PHPUnit_Framework_MockObject_MockObject
+     * @var EventStorageInterface|MockObject
      */
     private $mockEventStorage;
 
     /**
-     * @var EventStore|\PHPUnit_Framework_MockObject_MockObject
+     * @var EventStore|MockObject
      */
     private $mockEventStore;
 
     /**
-     * @var ObjectManagerInterface|\PHPUnit_Framework_MockObject_MockObject
+     * @var ObjectManagerInterface|MockObject
      */
     private $mockObjectManager;
 
