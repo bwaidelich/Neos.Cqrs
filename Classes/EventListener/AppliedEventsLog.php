@@ -25,10 +25,10 @@ class AppliedEventsLog
      * @ORM\Id
      * @var string
      */
-    public $eventListenerIdentifier;
+    protected $eventListenerIdentifier;
 
     /**
      * @var integer
      */
-    public $highestAppliedSequenceNumber;
+    protected $highestAppliedSequenceNumber;
 }

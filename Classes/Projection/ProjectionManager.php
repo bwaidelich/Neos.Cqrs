@@ -11,9 +11,8 @@ namespace Neos\EventSourcing\Projection;
  * source code.
  */
 
-use Neos\EventSourcing\Event\EventTypeResolver;
-use Neos\EventSourcing\EventListener\EventListenerLocator;
 use Neos\EventSourcing\EventListener\AsynchronousEventListenerInterface;
+use Neos\EventSourcing\EventListener\EventListenerManager;
 use Neos\EventSourcing\EventStore\EventStoreManager;
 use Neos\EventSourcing\EventStore\Exception\EventStreamNotFoundException;
 use Neos\EventSourcing\EventStore\Stream\Filter\EventTypesFilter;
@@ -38,15 +37,9 @@ class ProjectionManager
 
     /**
      * @Flow\Inject
-     * @var EventTypeResolver
+     * @var EventListenerManager
      */
-    protected $eventTypeResolver;
-
-    /**
-     * @Flow\Inject
-     * @var EventListenerLocator
-     */
-    protected $eventListenerLocator;
+    protected $eventListenerManager;
 
     /**
      * @Flow\Inject
@@ -89,7 +82,7 @@ class ProjectionManager
     {
         $fullProjectionIdentifier = $this->normalizeProjectionIdentifier($projectionIdentifier);
         $projectorClassName = $this->projections[$fullProjectionIdentifier];
-        $eventTypes = $this->eventListenerLocator->getEventTypesByListenerClassName($projectorClassName);
+        $eventTypes = $this->eventListenerManager->getEventTypesByListenerClassName($projectorClassName);
         return new Projection($fullProjectionIdentifier, $projectorClassName, $eventTypes);
     }
 
@@ -112,17 +105,18 @@ class ProjectionManager
      *
      * @param string $projectionIdentifier unambiguous identifier of the projection to replay
      * @param \Closure $progressCallback If set, this callback is invoked for every applied event during replay with the arguments $sequenceNumber and $eventStreamVersion
+     * @param int $minimumSequenceNumber This parameter allows to replay the projection from a specific point in the event sequence. If not set, the sequence is replayed from the beginning
      * @return void
      * @api
      */
-    public function replay(string $projectionIdentifier, \Closure $progressCallback = null)
+    public function replay(string $projectionIdentifier, \Closure $progressCallback = null, int $minimumSequenceNumber = 0)
     {
         $projection = $this->getProjection($projectionIdentifier);
 
         $projector = $this->objectManager->get($projection->getProjectorClassName());
         $projector->reset();
 
-        $filter = new EventTypesFilter($projection->getEventTypes());
+        $filter = new EventTypesFilter($projection->getEventTypes(), $minimumSequenceNumber);
 
         $eventStore = $this->eventStoreManager->getEventStoreForEventListener($projection->getProjectorClassName());
         try {
@@ -130,17 +124,10 @@ class ProjectionManager
         } catch (EventStreamNotFoundException $exception) {
             return;
         }
-        foreach ($eventStream as $sequenceNumber => $eventAndRawEvent) {
-            $rawEvent = $eventAndRawEvent->getRawEvent();
-            $listener = $this->eventListenerLocator->getListener($rawEvent->getType(), $projection->getProjectorClassName());
-            call_user_func($listener, $eventAndRawEvent->getEvent(), $rawEvent);
-            if ($progressCallback !== null) {
-                call_user_func($progressCallback, $sequenceNumber);
-            }
-
-            if ($projector instanceof AsynchronousEventListenerInterface) {
-                $projector->saveHighestAppliedSequenceNumber($sequenceNumber);
-            }
+        /** @var ProjectorInterface $projector */
+        $projector = $this->objectManager->get($projection->getProjectorClassName());
+        foreach ($eventStream as $eventAndRawEvent) {
+            $this->eventListenerManager->invokeListenerOnObject($projector, $eventAndRawEvent->getEvent(), $eventAndRawEvent->getRawEvent());
         }
     }
 
@@ -169,15 +156,8 @@ class ProjectionManager
         } catch (EventStreamNotFoundException $exception) {
             return;
         }
-        foreach ($eventStream as $sequenceNumber => $eventAndRawEvent) {
-            $rawEvent = $eventAndRawEvent->getRawEvent();
-            $listener = $this->eventListenerLocator->getListener($rawEvent->getType(), $projection->getProjectorClassName());
-            call_user_func($listener, $eventAndRawEvent->getEvent(), $rawEvent);
-            if ($progressCallback !== null) {
-                call_user_func($progressCallback, $sequenceNumber);
-            }
-
-            $projector->saveHighestAppliedSequenceNumber($sequenceNumber);
+        foreach ($eventStream as $eventAndRawEvent) {
+            $this->eventListenerManager->invokeListenerOnObject($projector, $eventAndRawEvent->getEvent(), $eventAndRawEvent->getRawEvent());
         }
     }
 
