@@ -1,9 +1,115 @@
 # Event Sourcing and CQRS for Flow Framework
 
-_This package is currently under development and not fully tested, please don't use it in production._
+Library providing interfaces and implementations for event-sourced applications. 
 
-Major Rewrite in process.. Stay tuned
+## Getting started
 
+Install this package via composer:
+
+```
+composer require neos/event-sourcing
+```
+
+### Writing events
+
+<details>
+<summary>Example event: <i>SomethingHasHappened.php</i></summary>
+
+```php
+<?php
+namespace Some\Package;
+
+use Neos\EventSourcing\Event\DomainEventInterface;
+
+final class SomethingHasHappened implements DomainEventInterface
+{
+    /**
+     * @var string
+     */
+    private $message;
+
+    public function __construct(string $message)
+    {
+        $this->message = $message;
+    }
+
+    public function getMessage(): string
+    {
+        return $this->message;
+    }
+
+}
+```
+</details>
+
+```php
+<?php
+namespace Some\Package;
+
+use Neos\EventSourcing\Event\DomainEvents;
+use Neos\EventSourcing\EventStore\EventStore;
+use Neos\EventSourcing\EventStore\StreamName;
+use Neos\Flow\Annotations as Flow;
+
+class SomeClass
+{
+
+    /**
+     * @Flow\Inject
+     * @var EventStore
+     */
+    protected $eventStore;
+
+    public function writeEvent(): void
+    {
+        $domainEvent = new SomethingHasHappened('some message');
+        $streamName = StreamName::fromString('some-stream');
+        $this->eventStore->commit($streamName, DomainEvents::withSingleEvent($domainEvent));
+    }
+
+}
+```
+
+### Reading events
+
+```php
+<?php
+namespace Some\Package;
+
+use Neos\EventSourcing\EventStore\EventStore;
+use Neos\EventSourcing\EventStore\StreamName;
+use Neos\Flow\Annotations as Flow;
+
+class SomeClass
+{
+
+    /**
+     * @Flow\Inject
+     * @var EventStore
+     */
+    protected $eventStore;
+
+    public function readEvents(): void
+    {
+        $streamName = StreamName::fromString('some-stream');
+        $eventStream = $this->eventStore->load($streamName);
+        foreach ($eventStream as $eventEnvelope) {
+            // the event as it's stored in the Event Store, including its global sequence number and the serialized payload
+            $rawEvent = $eventEnvelope->getRawEvent();
+
+            // the deserialized DomainEventInterface instance 
+            $domainEvent = $eventEnvelope->getDomainEvent();
+        }
+    }
+
+}
+```
+
+## Tutorial
+
+...to be written.
+
+See [Glossary](Glossary.md#event-correlation)
 
 ### Basic Event Flow
 
