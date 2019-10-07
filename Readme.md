@@ -6,9 +6,22 @@ Library providing interfaces and implementations for event-sourced applications.
 
 Install this package via composer:
 
-```
+```shell script
 composer require neos/event-sourcing
 ```
+
+Set up the `default` Event Store:
+
+```shell script
+./flow eventstore:setup default
+```
+
+<details>
+<summary>:information_source: Note:</summary>
+By default the Event Store persists events in the same database that is used for Flow persistence.
+But because that can be configured otherwise, this table is not generated via Doctrine migrations.
+If your application relies on the events table to exist, you can of course still add a Doctrine migration for it.
+</details>
 
 ### Writing events
 
@@ -50,6 +63,7 @@ use Neos\EventSourcing\Event\DomainEvents;
 use Neos\EventSourcing\EventStore\EventStore;
 use Neos\EventSourcing\EventStore\StreamName;
 use Neos\Flow\Annotations as Flow;
+use Some\Package\SomethingHasHappened;
 
 class SomeClass
 {
@@ -60,7 +74,7 @@ class SomeClass
      */
     protected $eventStore;
 
-    public function writeEvent(): void
+    public function someMethod(): void
     {
         $domainEvent = new SomethingHasHappened('some message');
         $streamName = StreamName::fromString('some-stream');
@@ -89,7 +103,7 @@ class SomeClass
      */
     protected $eventStore;
 
-    public function readEvents(): void
+    public function someMethod(): void
     {
         $streamName = StreamName::fromString('some-stream');
         $eventStream = $this->eventStore->load($streamName);
@@ -104,6 +118,28 @@ class SomeClass
 
 }
 ```
+
+### Reacting to events
+
+```php
+<?php
+namespace Some\Package;
+
+use Neos\EventSourcing\EventListener\EventListenerInterface;
+use Some\Package\SomethingHasHappened;
+
+class SomeEventListener implements EventListenerInterface
+{
+
+    public function whenSomethingHasHappened(SomethingHasHappened $event): void
+    {
+        // do something with the $event
+    }
+
+}
+```
+
+The `when*()` methods of classes implementing the `EventListenerInterface` will be invoked whenever a corresponding event is committed to the Event Store.
 
 ## Tutorial
 

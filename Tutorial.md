@@ -1,0 +1,1179 @@
+# Tutorial
+
+For this tutorial we want to build a simple *notification* system.
+It will allow short text messages to be sent to users that they have to acknowledge in time.
+
+Event-Sourcing will potentially give us some advantages in this scenario:
+* A reliable audit log in cases of errors (did user x see notification y before incident y happened?)
+* Non-blocking (async) handling
+* Temporal modeling
+
+Let's assume we have the following 3 milestones:
+
+> ### Milestone 1:
+> * **Notifications** can be sent to individual **Users**
+> * Users can see assigned Notifications in their **Inbox** and can **acknowledge** those
+>
+> ### Milestone 2:
+> * **Channels** can be introduced in order to notify multiple Users at once
+> * Users can subscribe to Channels to receive corresponding Notifications
+>
+> ### Milestone 3:
+> * No more than two Notifications must be allowed for one Channel within 10 seconds
+> * If a User doesn't acknowledge a Notification within 1 hour they receive a **Reminder** email
+> * Reminder emails are "debounced", so that no more than one mail per 10 Minutes is sent
+
+## Setup
+
+For this tutorial we assume you have a running Flow 5.3 installation with the `neos/event-sourcing` package installed in version 2.x.
+To keep things easy, we'll put all of the code into one Flow package `Acme.Notifications`.
+You can create it using the kickstarter:
+
+```
+./flow kickstart:package Acme.Notifications
+```
+
+
+To verify that the event store is setup correctly, you can use the `status` command:
+
+```
+./flow eventstore:status
+```
+
+And the output should be something like this:
+
+```
+Displaying status information for 1 Event Store backend(s):
+
+Event Store "default"
+-------------------------------------------------------------------------------
+Host: 127.0.0.1
+Port:
+Database: tutorial
+Driver: pdo_mysql
+Username: root
+Table: neos_eventsourcing_eventstore_events (exists)
+SUCCESS
+```
+
+## Events
+
+With the Milestones above the following [:book:Domain Events](Glossary.md#domain-event) could occur:
+
+* A User was notified
+* A Notification was acknowledged by the User
+* A Channel was added
+* A User subscribed to a Channel
+* A Notification was sent to a Channel
+* A Reminder Email was sent
+
+For a final version there would probably be more Event types (there is currently no way to *unsubscribe* users from a Channel for example). But for the sake of simplicity we stick to the six above for this tutorial.
+
+## Milestone 1
+
+> * **Notifications** can be sent to individual **Users**
+> * Users can see assigned Notifications in their **Inbox** and can **acknowledge** those
+
+In this package a Domain Event is represented by a class that implements the `Neos\EventSourcing\Event\DomainEventInterface`.
+So let's create a first Event class `Packages/Application/Acme.Notifications/Classes/Events/UserWasNotified` 
+
+```php
+<?php
+declare(strict_types=1);
+namespace Acme\Notifications\Events;
+
+use Neos\EventSourcing\Event\DomainEventInterface;
+
+final class UserWasNotified implements DomainEventInterface
+{
+
+    /**
+     * @var string
+     */
+    private $userId;
+
+    /**
+     * @var string
+     */
+    private $notificationId;
+
+    /**
+     * @var string
+     */
+    private $message;
+
+    /**
+     * @var \DateTimeInterface
+     */
+    private $timestamp;
+
+    public function __construct(string $userId, string $notificationId, string $message, \DateTimeInterface $timestamp)
+    {
+        $this->userId = $userId;
+        $this->notificationId = $notificationId;
+        $this->message = $message;
+        $this->timestamp = $timestamp;
+    }
+
+    public function getUserId(): string
+    {
+        return $this->userId;
+    }
+
+    public function getNotificationId(): string
+    {
+        return $this->notificationId;
+    }
+
+    public function getMessage(): string
+    {
+        return $this->message;
+    }
+
+    public function getTimestamp(): \DateTimeInterface
+    {
+        return $this->timestamp;
+    }
+}
+```
+
+To test the application we create a simple `CommandController` so that we can interact with it via CLI:
+
+
+```php
+<?php
+declare(strict_types=1);
+namespace Acme\Notifications\Command;
+
+use Acme\Notifications\Events\UserWasNotified;
+use Neos\EventSourcing\Event\DomainEvents;
+use Neos\EventSourcing\EventStore\EventStore;
+use Neos\EventSourcing\EventStore\StreamName;
+use Neos\Flow\Annotations as Flow;
+use Neos\Flow\Cli\CommandController;
+use Neos\Flow\Utility\Algorithms;
+
+final class UserCommandController extends CommandController
+{
+
+    /**
+     * @Flow\Inject
+     * @var EventStore
+     */
+    protected $eventStore;
+
+    /**
+     * Notifies a user with <user-id> of the specified <message>
+     *
+     * @param string $userId ID of the user to notify
+     * @param string $message Message to send to the user
+     */
+    public function notifyCommand(string $userId, string $message): void
+    {
+        // generate a unique id for the notification
+        $notificationId = Algorithms::generateUUID();
+        $timestamp = new \DateTimeImmutable();
+        $event = new UserWasNotified($userId, $notificationId, $message, $timestamp);
+
+        // we publish user related events to a stream named "user-<user-id>"
+        $streamName = StreamName::fromString('user-' . $userId);
+        $this->eventStore->commit($streamName, DomainEvents::withSingleEvent($event));
+
+        $this->outputLine('<success>Sent notification <b>%s</b> to user <b>%s</b>.</success>', [$notificationId, $userId]);
+    }
+}
+```
+
+With that in place you are able to publish the first event:
+
+```
+./flow user:notify user1 "The first message"
+```
+
+And the output should be something like:
+
+```
+Sent notification fdf70c75-daa5-46d5-8cae-a2290e290d79 to user user1.
+```
+
+<details><summary>:information_source:<i>Note...</i></summary>
+
+> We just assume that a user with the id "user1" exists at this place. User management ist out of scope of this tutorial
+</details>
+
+When using the default Event Store configuration, the following row should have been added to the `neos_eventsourcing_eventstore_events` database table:
+
+|sequencenumber|stream    |version|type                              |payload                                                                                                                    |metadata|id                                  |correlationidentifier|causationidentifier|recordedat         |
+|--------------|----------|-------|----------------------------------|---------------------------------------------------------------------------------------------------------------------------|--------|------------------------------------|---------------------|-------------------|-------------------|
+|1             |user-user1|0      |Acme.Notifications:UserWasNotified|{↵    "userId": "user1",↵    "notificationId": "28a5c887-25d9-4258-887c-b1dd614a4e57",↵    "message": "The first message"↵}|[:book:]      |875378c5-e808-4649-a51e-95a6c39a88e5|NULL                 |NULL               |2019-12-13 17:33:14|
+
+
+## Projection
+
+In Event-Sourced systems the application state is stored as a sequence of events.
+This state can be [:book:projected](Glossary.md#projection) into a form that is optimized for reading use cases, the so called [:book:Read Model](Glossary.md#read-model) (aka "Query Model" or "View Model").
+
+For the projector we have to implement the `Neos\EventSourcing\Projection\ProjectorInterface`.
+Like any [:book:Event Listener](Glossary.md#event-listener) the events are handled by corresponding `when<EventClassName>()` methods: 
+
+
+```php
+<?php
+declare(strict_types=1);
+namespace Acme\Notifications;
+
+use Acme\Notifications\Events\UserWasNotified;
+use Neos\EventSourcing\Projection\ProjectorInterface;
+
+final class InboxProjector implements ProjectorInterface
+{
+
+    public function reset(): void
+    {
+        // TODO: reset the projector state
+    }
+
+    public function whenUserWasNotified(UserWasNotified $event): void
+    {
+        // TODO: update the projector state
+    }
+}
+```
+
+Once that class exists, it is automatically registered as projection that can be listed via the `projection:list` command:
+
+```
+./flow projection:list
+```
+
+```
+There is one projection configured:
+
+PACKAGE "ACME.NOTIFICATIONS":
+-------------------------------------------------------------------------------
+  inbox                                    Acme\Notifications\InboxProjector
+```
+
+### Projection state
+
+In this case we want to persist the state of the `Inbox` Projection in a simple database table.
+So we'll need a corresponding Doctrine migration:
+
+```php
+<?php
+declare(strict_types=1);
+namespace Neos\Flow\Persistence\Doctrine\Migrations;
+
+use Doctrine\DBAL\Schema\Schema;
+use Doctrine\Migrations\AbstractMigration;
+
+final class Version20191004174235 extends AbstractMigration
+{
+
+    public function getDescription()
+    {
+        return 'Table for the inbox Read Model';
+    }
+
+    public function up(Schema $schema)
+    {
+        $this->addSql('CREATE TABLE acme_notifications (id VARCHAR(40) NOT NULL, userid VARCHAR(40) NOT NULL, message TEXT NOT NULL, PRIMARY KEY (id, userid)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
+    }
+
+    public function down(Schema $schema)
+    {
+        $this->addSql('DROP TABLE acme_notifications');
+    }
+}
+```
+
+```
+./flow doctrine:migrate
+```
+
+<details><summary>:information_source:<i>Tip...</i></summary>
+
+> As we don't want to create Entity classes in this tutorial and just work with DBAL, we can disable automatic Doctrine migrations for it with the following settings:
+
+```yaml
+Neos:
+  Flow:
+    persistence:
+      doctrine:
+        migrations:
+          ignoredTables:
+            '^acme_notifications_.*': true
+```
+</details>
+
+Otherwise future calls of `./flow doctrine:migrationgenerate` will create a migration that drops the `acme_notifications` table because no corresponding entity can be found.
+</details>
+
+Now we can extend our `InboxProjector` to actually make use of the new table:
+
+```php
+<?php
+declare(strict_types=1);
+namespace Acme\Notifications;
+
+use Acme\Notifications\Events\UserHasAcknowledgedNotification;
+use Acme\Notifications\Events\UserWasNotified;
+use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Types\Type;
+use Doctrine\ORM\EntityManagerInterface;
+use Neos\EventSourcing\Projection\ProjectorInterface;
+
+final class InboxProjector implements ProjectorInterface
+{
+    /**
+     * @var Connection
+     */
+    protected $dbal;
+
+    public function injectEntityManager(EntityManagerInterface $entityManager): void
+    {
+        $this->dbal = $entityManager->getConnection();
+    }
+
+    public function reset(): void
+    {
+        $this->dbal->executeQuery('TRUNCATE TABLE acme_notifications_inbox');
+    }
+
+    public function whenUserWasNotified(UserWasNotified $event): void
+    {
+        $this->dbal->insert('acme_notifications_inbox', [
+            'id' => $event->getNotificationId(),
+            'userid' => $event->getUserId(),
+            'message' => $event->getMessage(),
+            'timestamp' => $event->getTimestamp()
+        ], [
+            'timestamp' => Type::DATETIME,
+        ]);
+    }
+
+    public function whenUserHasAcknowledgedNotification(UserHasAcknowledgedNotification $event): void
+    {
+        $this->dbal->delete('acme_notifications_inbox', ['id' => $event->getNotificationId(), 'userid' => $event->getUserId()]);
+    }
+}
+```
+
+From now on the `InboxProjector` will be triggered automatically whenever an event with a matching `when*()` method is committed to the Event Store.
+Additionally we can *replay*  the projection to apply events that have been published in the past:
+
+
+```
+./flow projection:replay inbox
+```
+
+With the one event we published before this should lead to the following output:
+
+```
+Replaying events for projection "acme.notifications:inbox" ...
+    1 [============================]
+Replayed 1 event(s).
+```
+
+Afterwards the `acme_notifications` table should contain one row:
+
+|id                                  |userid|message          |timestamp          |
+|------------------------------------|------|-----------------|-------------------|
+|fdf70c75-daa5-46d5-8cae-a2290e290d79|user1 |The first message|2019-10-07 09:42:48|
+
+To allow the application to query the Read Model we create a corresponding Finder:
+
+```php
+<?php
+declare(strict_types=1);
+namespace Acme\Notifications;
+
+use Doctrine\DBAL\Connection;
+use Doctrine\ORM\EntityManagerInterface;
+
+final class Inbox
+{
+    /**
+     * @var string
+     */
+    private $userId;
+
+    /**
+     * @var Connection
+     */
+    private $dbal;
+
+    public function injectEntityManager(EntityManagerInterface $entityManager): void
+    {
+        $this->dbal = $entityManager->getConnection();
+    }
+
+    protected function __construct(string $userId)
+    {
+        $this->userId = $userId;
+    }
+
+    /**
+     * Create an inbox instance for the given user id
+     *
+     * @param string $userId
+     * @return static
+     */
+    public static function forUser(string $userId): self
+    {
+        return new static($userId);
+    }
+
+    /**
+     * Get all pending notifications
+     *
+     * @return array
+     */
+    public function getNotifications(): array
+    {
+        return $this->dbal->fetchAll('SELECT * FROM acme_notifications WHERE userid = :userId', ['userId' => $this->userId]);
+    }
+}
+```
+
+To use this we can add a second command to our `UserCommandHandler`:
+
+```php
+<?php
+// ...
+use Acme\Notifications\Inbox;
+
+final class UserCommandHandler extends CommandController
+{
+
+    // ...
+
+    /**
+     * List pending notifications for user <user-id>
+     *
+     * @param string $userId ID of the user to show pending notifications for
+     */
+    public function inboxCommand(string $userId): void
+    {
+        $notifications = Inbox::forUser($userId)->getNotifications();
+        $this->outputLine('<b>%d</b> pending message(s) for user <b>%s</b>:', [count($notifications), $userId]);
+        foreach ($notifications as $notification) {
+            $this->outputLine('* <b>%s</b> (id: %s)', [$notification['message'], $notification['id']]);
+        }
+    }
+}
+
+```
+
+```
+./flow user:inbox user1
+```
+
+```
+1 pending message(s) for user user1:
+* The first message (id: fdf70c75-daa5-46d5-8cae-a2290e290d79)
+```
+
+Finally users should be able to *acknowledge* Notifications to hide them from the Inbox.
+
+We start with the event again:
+
+```php
+<?php
+declare(strict_types=1);
+namespace Acme\Notifications\Events;
+
+use Neos\EventSourcing\Event\DomainEventInterface;
+
+final class UserHasAcknowledgedNotification implements DomainEventInterface
+{
+
+    /**
+     * @var string
+     */
+    private $userId;
+
+    /**
+     * @var string
+     */
+    private $notificationId;
+
+    public function __construct(string $userId, string $notificationId)
+    {
+        $this->userId = $userId;
+        $this->notificationId = $notificationId;
+    }
+
+    public function getUserId(): string
+    {
+        return $this->userId;
+    }
+
+    public function getNotificationId(): string
+    {
+        return $this->notificationId;
+    }
+}
+```
+
+...and extend the `InboxProjector`:
+
+```php
+// ...
+use Acme\Notifications\Events\UserHasAcknowledgedNotification;
+
+final class InboxProjector implements ProjectorInterface
+{
+    // ...
+
+    public function whenUserHasAcknowledgedNotification(UserHasAcknowledgedNotification $event): void
+    {
+        $this->dbal->delete('acme_notifications_inbox', ['id' => $event->getNotificationId(), 'userid' => $event->getUserId()]);
+    }
+}
+```
+
+You might be surprised that we just delete notifications from the database once they are acknowledged. But that's one of the advantages of Event-Sourcing:
+Since the *Unique Source Of Truth* lies not in the Read Model but in the Events we can extend the projection at a later point (introducing a "Notification archive" for example).
+
+In order to test Notification acknowledgment we can extend our `UserCommandController`:
+
+```php
+// ...
+use Acme\Notifications\Events\UserHasAcknowledgedNotification;
+
+final class UserCommandController extends CommandController
+{
+
+    //...
+
+    /**
+     * Marks notification with <notification-id> acknowledged for user with <user-id>
+     *
+     * @param string $userId ID of the acknowledging user
+     * @param string $notificationId ID of the notification to acknowledge
+     */
+    public function acknowledgeCommand(string $userId, string $notificationId): void
+    {
+        $event = new UserHasAcknowledgedNotification($userId, $notificationId);
+        $streamName = StreamName::fromString('user-' . $userId);
+        $this->eventStore->commit($streamName, DomainEvents::withSingleEvent($event));
+        $this->outputLine('<success>Notification <b>%s</b> was acknowledged.</success>', [$notificationId]);
+    }
+}
+```
+
+### Consistence/Integrity
+
+With the current state it would be possible to acknowledge Notifications that don't exist or have been acknowledged before.
+This would not be a major issue with the current implementation: The "delete" clause in the projector would just not have any effect in this case.
+But the recorded Domain Events would not reflect what actually happened and future Event Listeners could stumble upon this case.
+
+To prevent non-existing and already acknowledged Notifications from being processed by the new command, we can simply check whether a Notification with the given id is in the Inbox for the respective user.
+To do this we extend the `Inbox`:   
+
+
+```php
+// ...
+final class Inbox
+{
+    // ...
+
+    /**
+     * Returns TRUE if a notification with the specified id is pending, otherwise FALSE
+     * 
+     * @param string $notificationId
+     * @return bool
+     */
+    public function containsNotification(string $notificationId): bool
+    {
+        return $this->dbal->fetchColumn('SELECT id FROM acme_notifications_inbox WHERE id = :notificationId AND userid = :userId', ['userId' => $this->userId, 'notificationId' => $notificationId]) !== false;
+    }
+}
+```
+
+And add a safe guard to the corresponding command:
+
+```php
+// ...
+final class UserCommandController extends CommandController
+{
+
+    public function acknowledgeCommand(string $userId, string $notificationId): void
+    {
+        $inbox = Inbox::forUser($userId);
+        if (!$inbox->containsNotification($userId, $notificationId)) {
+            $this->outputLine('<error>No notification with id <b>%s</b> pending for user <b>%s</b></error>', [$notificationId, $userId]);
+            $this->quit(1);
+            return;
+        }
+        // ...
+    }
+}
+```
+
+## Milestone 2
+
+> * **Channels** can be introduced in order to notify multiple Users at once
+> * Users can subscribe to Channels to receive corresponding Notifications
+
+As before let's start by creating the Domain Event classes:
+
+<details><summary><code>ChannelWasAdded.php</code></summary>
+
+```php
+<?php
+declare(strict_types=1);
+namespace Acme\Notifications\Events;
+
+use Neos\EventSourcing\Event\DomainEventInterface;
+
+final class ChannelWasAdded implements DomainEventInterface
+{
+
+    /**
+     * @var string
+     */
+    private $channelId;
+
+    /**
+     * @var string
+     */
+    private $label;
+
+    public function __construct(string $channelId, string $label)
+    {
+        $this->channelId = $channelId;
+        $this->label = $label;
+    }
+
+    public function getChannelId(): string
+    {
+        return $this->channelId;
+    }
+
+    public function getLabel(): string
+    {
+        return $this->label;
+    }
+}
+```
+</details>
+
+<details><summary><code>UserWasSubscribedToChannel.php</code></summary>
+
+```php
+<?php
+declare(strict_types=1);
+namespace Acme\Notifications\Events;
+
+use Neos\EventSourcing\Event\DomainEventInterface;
+
+final class UserWasSubscribedToChannel implements DomainEventInterface
+{
+
+    /**
+     * @var string
+     */
+    private $userId;
+
+    /**
+     * @var string
+     */
+    private $channelId;
+
+    public function __construct(string $userId, string $channelId)
+    {
+        $this->userId = $userId;
+        $this->channelId = $channelId;
+    }
+
+    public function getUserId(): string
+    {
+        return $this->userId;
+    }
+
+    public function getChannelId(): string
+    {
+        return $this->channelId;
+    }
+}
+```
+</details>
+
+Now we can create another `CommandController` to test the app:
+
+
+```php
+<?php
+declare(strict_types=1);
+namespace Acme\Notifications\Command;
+
+use Acme\Notifications\Events\ChannelWasAdded;
+use Acme\Notifications\Events\UserWasSubscribedToChannel;
+use Neos\EventSourcing\Event\DomainEvents;
+use Neos\EventSourcing\EventStore\EventStore;
+use Neos\EventSourcing\EventStore\StreamName;
+use Neos\Flow\Annotations as Flow;
+use Neos\Flow\Cli\CommandController;
+
+final class ChannelCommandController extends CommandController
+{
+
+    /**
+     * @Flow\Inject
+     * @var EventStore
+     */
+    protected $eventStore;
+
+    /**
+     * Adds a new Channel for users to subscribe to
+     *
+     * @param string $channelId ID of the channel to add
+     * @param string $label Human readable label of the channel
+     */
+    public function addCommand(string $channelId, string $label): void
+    {
+        $event = new ChannelWasAdded($channelId, $label);
+        $streamName = StreamName::fromString('channel-' . $channelId);
+        $this->eventStore->commit($streamName, DomainEvents::withSingleEvent($event));
+        $this->outputLine('<success>Channel "%s" was created with id "<b>%s</b>"</success>', [$label, $channelId]);
+    }
+
+    /**
+     * Subscribes user <user-id> to the channel <channel-id>
+     *
+     * @param string $channelId ID of the channel to subscribe the user to
+     * @param string $userId ID of the user to subscribe
+     */
+    public function subscribeCommand(string $channelId, string $userId): void
+    {
+        $event = new UserWasSubscribedToChannel($userId, $channelId);
+        $streamName = StreamName::fromString('channel-' . $channelId);
+        $this->eventStore->commit($streamName, DomainEvents::withSingleEvent($event));
+        $this->outputLine('<success>Subscribed user with id "%s" to channel <b>%s</b></success>', [$userId, $channelId]);
+    }
+
+    /**
+     * Notifies all users subscribed to <channel-id>
+     *
+     * @param string $channelId ID of the channel to send a message to
+     * @param string $message Message to send to all subscribed users
+     */
+    public function notifyCommand(string $channelId, string $message): void
+    {
+        // TODO implement channel notification
+    }
+}
+```
+
+<details><summary>:information_source:<i>Note...</i></summary>
+
+> It's not very common to let the client define the ID of entities. But for the sake of this example we consider it OK that the channel ID is defined via CLI.
+> Alternatively we could for example create it in the Command Controller using a UUID, like we did for the Notification ID
+</details>
+
+This will already allow us to create new Channels and subscribe Users to them.
+But there are no corresponding [:book:Event Listeners](Glossary.md#event-listener) for the new [:book:Domain Events](Glossary.md#domain-event), so this won't have any effect just yet.
+
+You might be tempted to extend our existing `InboxProjector` to handle the logic of Channel subscription and notification, but this would add a whole lot of complexity.
+Instead we could consider the Channel management to belong to a separate [:book:Bounded Context](Glossary.md#bounded-context) that only interacts with the Notification system.
+
+Another temptation might be to create a Read Model that tracks Channel subscriptions and then iterate through all subscribed users in the Command Controller:
+
+```php
+// ...
+final class ChannelCommandController extends CommandController
+{
+
+    // ...
+
+    public function notifyCommand(string $channelId, string $message): void
+    {
+        $userIds = $this->retrieveAssignedUserIdsFromSomeReadModel($channelId);
+        foreach ($userIds as $userId) {
+            // publish UserWasNotified event
+        }
+    }
+}
+```
+
+This would certainly be an option. But there are some potential drawbacks:
+* For thousands of subscribed users this might be rather slow and because the command handling is blocking, the invoking script would have to wait until all events have been published
+* More importantly: If the script fails or is interrupted half way through, it leaves us with an invalid state that is hard to recover from
+
+Alternatively we could consider the "Channel notification" itself a Domain Event and process it asynchronously via a [:book:Process Manager](Glossary.md#process-manager).
+
+So let's create an Event Class `ChannelWasNotified` that is very similar to the existing `UserWasNotified`:
+
+
+<details><summary><code>ChannelWasNotified.php</code></summary>
+
+```php
+<?php
+declare(strict_types=1);
+namespace Acme\Notifications\Events;
+
+use Neos\EventSourcing\Event\DomainEventInterface;
+
+final class ChannelWasNotified implements DomainEventInterface
+{
+
+    /**
+     * @var string
+     */
+    private $channelId;
+
+    /**
+     * @var string
+     */
+    private $notificationId;
+
+    /**
+     * @var string
+     */
+    private $message;
+
+    /**
+     * @var \DateTimeInterface
+     */
+    private $timestamp;
+
+    public function __construct(string $channelId, string $notificationId, string $message, \DateTimeInterface $timestamp)
+    {
+        $this->channelId = $channelId;
+        $this->notificationId = $notificationId;
+        $this->message = $message;
+        $this->timestamp = $timestamp;
+    }
+
+    public function getChannelId(): string
+    {
+        return $this->channelId;
+    }
+
+    public function getNotificationId(): string
+    {
+        return $this->notificationId;
+    }
+
+    public function getMessage(): string
+    {
+        return $this->message;
+    }
+
+    public function getTimestamp(): \DateTimeInterface
+    {
+        return $this->timestamp;
+    }
+}
+```
+</details>
+
+And make sure that the event is published in the `CommandController`:
+
+```php
+// ...
+use Acme\Notifications\Events\ChannelWasNotified;
+
+final class ChannelCommandController extends CommandController
+{
+
+    // ...
+
+    public function notifyCommand(string $channelId, string $message): void
+    {
+        $notificationId = Algorithms::generateUUID();
+        $event = new ChannelWasNotified($channelId, $notificationId, $message);
+        $streamName = StreamName::fromString('channel-' . $channelId);
+        $this->eventStore->commit($streamName, DomainEvents::withSingleEvent($event));
+        $this->outputLine('<success>Sent notification <b>%s</b> to channel <b>%s</b></success>', [$notificationId, $channelId]);
+    }
+}
+```
+
+Now to the interesting part, the Process Manager. It is similar to a Projector in the sense that it reacts to Domain Events and can keep their own state, but in contrary to a regular Projector the Process Manager can also trigger Commands.
+Let's start with the state part.
+We want to keep track of User-to-channel-subscriptions in a new database table that we need another Doctrine migration for:
+
+```php
+<?php
+declare(strict_types=1);
+namespace Neos\Flow\Persistence\Doctrine\Migrations;
+
+use Doctrine\DBAL\Schema\Schema;
+use Doctrine\Migrations\AbstractMigration;
+
+final class Version20191006181649 extends AbstractMigration
+{
+
+    public function getDescription()
+    {
+        return 'Table for the user to channel association';
+    }
+
+    public function up(Schema $schema)
+    {
+        $this->addSql('CREATE TABLE acme_notifications_channel_users (channelid VARCHAR(40) NOT NULL, userids TEXT NOT NULL, PRIMARY KEY (channelid)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
+    }
+
+    public function down(Schema $schema)
+    {
+        $this->addSql('DROP TABLE acme_notifications_channel_users');
+    }
+}
+```
+
+Otherwise future calls of `./flow doctrine:migrationgenerate` will create a migration that drops the `acme_notifications` table because no corresponding entity can be found.
+</details>
+
+```php
+<?php
+declare(strict_types=1);
+namespace Acme\Notifications;
+
+use Acme\Notifications\Events\ChannelWasAdded;
+use Acme\Notifications\Events\ChannelWasNotified;
+use Acme\Notifications\Events\UserWasSubscribedToChannel;
+use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\DBALException;
+use Doctrine\ORM\EntityManagerInterface;
+use Neos\EventSourcing\EventListener\EventListenerInterface;
+use Neos\Flow\Annotations as Flow;
+
+/**
+ * @Flow\Scope("singleton")
+ */
+final class ChannelNotificationProcessManager implements EventListenerInterface
+{
+    /**
+     * @var Connection
+     */
+    private $dbal;
+
+    public function __construct(EntityManagerInterface $entityManager)
+    {
+        $this->dbal = $entityManager->getConnection();
+    }
+
+    public function whenChannelWasAdded(ChannelWasAdded $event): void
+    {
+        $this->dbal->insert('acme_notifications_channel_users', ['channelId' => $event->getChannelId(), 'userIds' => '']);
+    }
+
+    public function whenUserWasSubscribedToChannel(UserWasSubscribedToChannel $event): void
+    {
+        $userIds = $this->usersThatSubscribedToChannel($event->getChannelId());
+        $userIds[] = $event->getUserId();
+        $this->dbal->update('acme_notifications_channel_users', ['userIds' => implode(',', $userIds)], ['channelId' => $event->getChannelId()]);
+    }
+
+    public function whenChannelWasNotified(ChannelWasNotified $event): void
+    {
+        $userIds = $this->usersThatSubscribedToChannel($event->getChannelId());
+        foreach ($userIds as $userId) {
+            // TODO forward the notification to user with id $userId
+        }
+    }
+
+    /**
+     * @param string $channelId
+     * @return string[] array of user IDs that are subscribed to the specified channel
+     */
+    private function usersThatSubscribedToChannel(string $channelId): array
+    {
+        try {
+            $userIdsString = $this->dbal->fetchColumn('SELECT userIds FROM acme_notifications_channel_users WHERE channelId = :channelId', ['channelId' => $channelId]);
+        } catch (DBALException $e) {
+            throw new \RuntimeException(sprintf('Could not fetch users for channel "%s": %s', $channelId, $e->getMessage()), 1563727265, $e);
+        }
+        if ($userIdsString === false || $userIdsString === '') {
+            return [];
+        }
+        return explode(',', (string)$userIdsString);
+    }
+}
+```
+
+
+
+```php
+<?php
+declare(strict_types=1);
+namespace Acme\Notifications;
+
+use Acme\Notifications\Events\UserHasAcknowledgedNotification;
+use Acme\Notifications\Events\UserWasNotified;
+use Neos\EventSourcing\Event\DomainEvents;
+use Neos\EventSourcing\EventStore\EventStore;
+use Neos\EventSourcing\EventStore\StreamName;
+use Neos\Flow\Annotations as Flow;
+
+/**
+ * @Flow\Scope("singleton")
+ */
+final class NotificationService
+{
+
+    /**
+     * @Flow\Inject
+     * @var EventStore
+     */
+    protected $eventStore;
+
+    public function notifyUser(string $userId, string $notificationId, string $message): void
+    {
+        // TODO check invariants
+        $timestamp = new \DateTimeImmutable();
+        $event = new UserWasNotified($userId, $notificationId, $message, $timestamp);
+        $streamName = StreamName::fromString('user-' . $userId);
+        $this->eventStore->commit($streamName, DomainEvents::withSingleEvent($event));
+    }
+
+    public function acknowledgeNotification(string $userId, string $notificationId): void
+    {
+        $inbox = Inbox::forUser($userId);
+        if (!$inbox->containsNotification($notificationId)) {
+            throw new \InvalidArgumentException(sprintf('No notification with id %s pending for user %s', $notificationId, $userId), 1570382486);
+        }
+        $event = new UserHasAcknowledgedNotification($userId, $notificationId);
+        $streamName = StreamName::fromString('user-' . $userId);
+        $this->eventStore->commit($streamName, DomainEvents::withSingleEvent($event));
+    }
+}
+```
+
+<details><summary>:information_source:<i>Note...</i></summary>
+
+> You could replace the many method arguments by a single [:book:Command](Glossary.md#command) DTO and turn the service into a [:book:CommandHandler](Glossary.md#command-handler)
+</details>
+
+The CLI CommandHandler can now be simplified:
+
+```php
+// ...
+use Acme\Notifications\NotificationService;
+
+final class UserCommandController extends CommandController
+{
+
+    /**
+     * @Flow\Inject
+     * @var NotificationService
+     */
+    protected $notificationService;
+
+    public function notifyCommand(string $userId, string $message): void
+    {
+        $notificationId = Algorithms::generateUUID();
+        $this->notificationService->notifyUser($userId, $notificationId, $message);
+        $this->outputLine('<success>Sent notification <b>%s</b> to user <b>%s</b>.</success>', [$notificationId, $userId]);
+    }
+
+    public function acknowledgeCommand(string $userId, string $notificationId): void
+    {
+        $this->notificationService->acknowledgeNotification($userId, $notificationId);
+        $this->outputLine('<success>Notification <b>%s</b> was acknowledged.</success>', [$notificationId]);
+    }
+
+    // ...
+
+}
+```
+
+And finally we can reuse the `notifyUser()` method from the `ChannelNotificationProcessManager`:
+
+```php
+// ...
+use Acme\Notifications\NotificationService;
+
+final class ChannelNotificationProcessManager implements EventListenerInterface
+{
+    // ...
+
+    /**
+     * @Flow\Inject
+     * @var NotificationService
+     */
+    protected $notificationService;
+
+    // ...
+
+    public function whenChannelWasNotified(ChannelWasNotified $event): void
+    {
+        $userIds = $this->usersThatSubscribedToChannel($event->getChannelId());
+        foreach ($userIds as $userId) {
+            $this->notificationService->notifyUser($userId, $event->getNotificationId(), $event->getMessage());
+        }
+    }
+
+    // ...
+}
+```
+
+Let's test this:
+
+1. Create a new channel
+    ```
+    ./flow channel:add channel1 "First channel"
+    ```
+
+    Output:
+
+    ```
+    Channel "First channel" was created with id "channel1"
+    ```
+
+2. Send a notification to that channel
+
+    ```
+    ./flow channel:notify channel1 "First message to channel1"
+    ```
+
+    Output:
+    
+    ```
+    Sent notification 59e4cc1d-1d81-49fc-8790-82f33637687c to channel channel1
+    ```
+
+3. Subscribe a user to the channel:
+    
+    ```
+    ./flow channel:subscribe channel1 user1
+    ```
+
+    Output:
+    
+    ```
+    ./flow channel:notify channel1 "Second message to channel1"
+    ```
+
+Now, if you check the users Inbox:
+
+```
+./flow user:inbox user1
+```
+
+..you should get:
+
+```
+2 pending message(s) for user user1:
+* Second message to channel1 (id: f96e88c8-15cd-4d0a-b8e8-86f9a7422ac7)
+* The first message (id: fdf70c75-daa5-46d5-8cae-a2290e290d79)
+```
+
+<details><summary>:information_source:<i>Note...</i></summary>
+
+> The "First message to channel1" did _not_ end up in the users inbox because we subscribed the user to the channel _afterwards_.
+</details>
+
+### Consistence/Integrity part two
+
+So far there are no consistency checks in place for the Channel management
+
+## Milestone 3
+
+> * No more than two Notifications must be allowed for one Channel within 10 seconds
+> * If a User doesn't acknowledge a Notification within 1 hour they receive a **Reminder** email
+> * Reminder emails are "debounced", so that no more than one mail per 10 Minutes is sent
+
