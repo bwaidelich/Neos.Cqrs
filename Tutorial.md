@@ -19,9 +19,9 @@ Let's assume we have the following 3 milestones:
 > * Users can subscribe to Channels to receive corresponding Notifications
 >
 > ### Milestone 3:
-> * No more than two Notifications must be allowed for one Channel within 10 seconds
+> * Flood protection: Don't allow more than one Notification to be sent to a Channel within 10 seconds
 > * If a User doesn't acknowledge a Notification within 1 hour they receive a **Reminder** email
-> * Reminder emails are "debounced", so that no more than one mail per 10 Minutes is sent
+> * Reminders are aggregated, so that no more than one mail per 10 minutes is sent to one user
 
 ## Setup
 
@@ -172,8 +172,8 @@ final class UserCommandController extends CommandController
     {
         // generate a unique id for the notification
         $notificationId = Algorithms::generateUUID();
-        $timestamp = new \DateTimeImmutable();
-        $event = new UserWasNotified($userId, $notificationId, $message, $timestamp);
+        $now = new \DateTimeImmutable();
+        $event = new UserWasNotified($userId, $notificationId, $message, $now);
 
         // we publish user related events to a stream named "user-<user-id>"
         $streamName = StreamName::fromString('user-' . $userId);
@@ -602,7 +602,7 @@ final class UserCommandController extends CommandController
     public function acknowledgeCommand(string $userId, string $notificationId): void
     {
         $inbox = Inbox::forUser($userId);
-        if (!$inbox->containsNotification($userId, $notificationId)) {
+        if (!$inbox->containsNotification($notificationId)) {
             $this->outputLine('<error>No notification with id <b>%s</b> pending for user <b>%s</b></error>', [$notificationId, $userId]);
             $this->quit(1);
             return;
@@ -892,7 +892,7 @@ final class ChannelCommandController extends CommandController
 }
 ```
 
-Now to the interesting part, the Process Manager. It is similar to a Projector in the sense that it reacts to Domain Events and can keep their own state, but in contrary to a regular Projector the Process Manager can also trigger Commands.
+Now to the interesting part, the Process Manager. It is similar to a Projector in the sense that it reacts to Domain Events and can have its own state, but in contrary to a regular Projector the Process Manager can also trigger Commands.
 Let's start with the state part.
 We want to keep track of User-to-channel-subscriptions in a new database table that we need another Doctrine migration for:
 
@@ -924,6 +924,11 @@ final class Version20191006181649 extends AbstractMigration
 }
 ```
 
+<details><summary>:information_source:<i>Note...</i></summary>
+
+> For the sake of simplicity, we store the user ids as a comma separated list
+</details>
+
 Otherwise future calls of `./flow doctrine:migrationgenerate` will create a migration that drops the `acme_notifications` table because no corresponding entity can be found.
 </details>
 
@@ -939,11 +944,7 @@ use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DBALException;
 use Doctrine\ORM\EntityManagerInterface;
 use Neos\EventSourcing\EventListener\EventListenerInterface;
-use Neos\Flow\Annotations as Flow;
 
-/**
- * @Flow\Scope("singleton")
- */
 final class ChannelNotificationProcessManager implements EventListenerInterface
 {
     /**
@@ -995,97 +996,14 @@ final class ChannelNotificationProcessManager implements EventListenerInterface
 }
 ```
 
+To publish the `UserWasNotified` events in the `whenChannelWasNotified`-handler we can copy the existing code from `UserCommandController::notifyCommand()`.
+
 
 
 ```php
-<?php
-declare(strict_types=1);
-namespace Acme\Notifications;
-
-use Acme\Notifications\Events\UserHasAcknowledgedNotification;
-use Acme\Notifications\Events\UserWasNotified;
-use Neos\EventSourcing\Event\DomainEvents;
+// ...
 use Neos\EventSourcing\EventStore\EventStore;
-use Neos\EventSourcing\EventStore\StreamName;
 use Neos\Flow\Annotations as Flow;
-
-/**
- * @Flow\Scope("singleton")
- */
-final class NotificationService
-{
-
-    /**
-     * @Flow\Inject
-     * @var EventStore
-     */
-    protected $eventStore;
-
-    public function notifyUser(string $userId, string $notificationId, string $message): void
-    {
-        // TODO check invariants
-        $timestamp = new \DateTimeImmutable();
-        $event = new UserWasNotified($userId, $notificationId, $message, $timestamp);
-        $streamName = StreamName::fromString('user-' . $userId);
-        $this->eventStore->commit($streamName, DomainEvents::withSingleEvent($event));
-    }
-
-    public function acknowledgeNotification(string $userId, string $notificationId): void
-    {
-        $inbox = Inbox::forUser($userId);
-        if (!$inbox->containsNotification($notificationId)) {
-            throw new \InvalidArgumentException(sprintf('No notification with id %s pending for user %s', $notificationId, $userId), 1570382486);
-        }
-        $event = new UserHasAcknowledgedNotification($userId, $notificationId);
-        $streamName = StreamName::fromString('user-' . $userId);
-        $this->eventStore->commit($streamName, DomainEvents::withSingleEvent($event));
-    }
-}
-```
-
-<details><summary>:information_source:<i>Note...</i></summary>
-
-> You could replace the many method arguments by a single [:book:Command](Glossary.md#command) DTO and turn the service into a [:book:CommandHandler](Glossary.md#command-handler)
-</details>
-
-The CLI CommandHandler can now be simplified:
-
-```php
-// ...
-use Acme\Notifications\NotificationService;
-
-final class UserCommandController extends CommandController
-{
-
-    /**
-     * @Flow\Inject
-     * @var NotificationService
-     */
-    protected $notificationService;
-
-    public function notifyCommand(string $userId, string $message): void
-    {
-        $notificationId = Algorithms::generateUUID();
-        $this->notificationService->notifyUser($userId, $notificationId, $message);
-        $this->outputLine('<success>Sent notification <b>%s</b> to user <b>%s</b>.</success>', [$notificationId, $userId]);
-    }
-
-    public function acknowledgeCommand(string $userId, string $notificationId): void
-    {
-        $this->notificationService->acknowledgeNotification($userId, $notificationId);
-        $this->outputLine('<success>Notification <b>%s</b> was acknowledged.</success>', [$notificationId]);
-    }
-
-    // ...
-
-}
-```
-
-And finally we can reuse the `notifyUser()` method from the `ChannelNotificationProcessManager`:
-
-```php
-// ...
-use Acme\Notifications\NotificationService;
 
 final class ChannelNotificationProcessManager implements EventListenerInterface
 {
@@ -1093,9 +1011,9 @@ final class ChannelNotificationProcessManager implements EventListenerInterface
 
     /**
      * @Flow\Inject
-     * @var NotificationService
+     * @var EventStore
      */
-    protected $notificationService;
+    protected $eventStore;
 
     // ...
 
@@ -1103,13 +1021,21 @@ final class ChannelNotificationProcessManager implements EventListenerInterface
     {
         $userIds = $this->usersThatSubscribedToChannel($event->getChannelId());
         foreach ($userIds as $userId) {
-            $this->notificationService->notifyUser($userId, $event->getNotificationId(), $event->getMessage());
+            $userEvent = new UserWasNotified($userId, $event->getNotificationId(), $event->getMessage(), $event->getTimestamp());
+            $streamName = StreamName::fromString('user-' . $userId);
+            $this->eventStore->commit($streamName, DomainEvents::withSingleEvent($userEvent));
         }
     }
 
     // ...
 }
 ```
+
+<details><summary>:information_source:<i>Note...</i></summary>
+
+> We duplicate some code here to keep it simple. In a productive application you probably want to introduce a central authority to commit events of a certain type
+> such as a "NotificationService" or "NotificationCommandHandler"
+</details>
 
 Let's test this:
 
@@ -1167,13 +1093,224 @@ Now, if you check the users Inbox:
 > The "First message to channel1" did _not_ end up in the users inbox because we subscribed the user to the channel _afterwards_.
 </details>
 
+This already seems to work nicely. But with the current implementation it would be hard to tell whether a notification was sent to a specific User directly or via a Channel.
+
+### Event Correlation
+
+Especially in systems with growing complexity it's a very good idea to [:book:correlate](Glossary.md#event-correlation) events so that it's easier to track back the originating trigger for a Notification. 
+We can adjust the `ChannelCommandController` and `ChannelNotificationProcessManager` to set a *causation* and *correlation* identifier to every `*WasNotified` event that is "forwarded" to the user using the `DecoratedEvent`-helper:
+
+```php
+// ...
+
+final class ChannelCommandController extends CommandController
+{
+
+    // ...
+
+    public function notifyCommand(string $channelId, string $message): void
+    {
+        // ...
+        $event = new ChannelWasNotified($channelId, $notificationId, $message, $timestamp);
+        // We just generate a new correlation ID. It could also be passed in by the client.
+        $correlationId = Algorithms::generateUUID();
+        $event = DecoratedEvent::addCorrelationIdentifier($event, $correlationId);
+        // ...
+    }
+}
+```
+
+```php
+// ...
+final class ChannelNotificationProcessManager implements EventListenerInterface
+{
+
+    public function whenChannelWasNotified(ChannelWasNotified $event, RawEvent $rawEvent): void
+    {
+        // ...
+        // take over the correlation ID of the incoming event (if it has one)
+        /** @var string|null $correlationId */
+        $correlationId = $rawEvent->getMetadata()['correlationId'] ?? null;
+        foreach ($userIds as $userId) {
+            $userEvent = new UserWasNotified($userId, $event->getNotificationId(), $event->getMessage(), $event->getTimestamp());
+            // set the causation ID to the ID of the originating event (ChannelWasNotified)
+            $userEvent = DecoratedEvent::addCausationIdentifier($userEvent, $rawEvent->getIdentifier());
+            // set the correlation ID if it is set
+            if ($correlationId !== null) {
+                $userEvent = DecoratedEvent::addCorrelationIdentifier($userEvent, $correlationId);
+            }
+            // ...
+        }
+    }
+```
+
+<details><summary>:information_source:<i>Note...</i></summary>
+
+> Since the correlation ID is not part of the Domain Event payload, we'll use the RawEvent to get hold of the metadata.
+> The RawEvent also contains the Event's `identifier`, `type`, it's raw `payload`, `streamName`, `version`, `sequenceNumber` and the `recordedAt` timestamp
+</details>
+
 ### Consistence/Integrity part two
 
-So far there are no consistency checks in place for the Channel management
+So far there are no consistency checks in place for the Channel management.
+One could re-use an existing id when adding a Channel and/or notify a non-existing channel.
+
+To prevent that, we can make use of the `expectedVersion` argument of the `EventStore::commit()` method (see [:book:Concurrency](Glossary.md#concurrency)):
+
+```php
+// ...
+use Neos\EventSourcing\EventStore\ExpectedVersion;
+
+final class ChannelCommandController extends CommandController
+{
+    // ...
+
+    public function addCommand(string $channelId, string $label): void
+    {
+        // ...
+        try {
+            $this->eventStore->commit($streamName, DomainEvents::withSingleEvent($event), ExpectedVersion::NO_STREAM);
+        } catch (ConcurrencyException $exception) {
+            $this->outputLine('<error>A channel with id "%s" already exists</error>', [$channelId]);
+            $this->quit(1);
+            return;
+        }
+        // ...
+    }
+
+    public function subscribeCommand(string $channelId, string $userId): void
+    {
+        // ...
+        try {
+            $this->eventStore->commit($streamName, DomainEvents::withSingleEvent($event), ExpectedVersion::STREAM_EXISTS);
+        } catch (ConcurrencyException $exception) {
+            $this->outputLine('<error>A channel with id "%s" does not exist</error>', [$channelId]);
+            $this->quit(1);
+            return;
+        }
+        // ...
+    }
+
+    public function notifyCommand(string $channelId, string $message): void
+    {
+        // ...
+        try {
+            $this->eventStore->commit($streamName, DomainEvents::withSingleEvent($event), ExpectedVersion::STREAM_EXISTS);
+        } catch (ConcurrencyException $exception) {
+            $this->outputLine('<error>A channel with id "%s" does not exist</error>', [$channelId]);
+            $this->quit(1);
+            return;
+        }
+        // ...
+    }
+}
+```
+
+This is a good first measure but it won't work for cases where it's possible to _archive_ or _delete_ Channels because the corresponding event stream would still exist afterwards (remember: we never delete events).
+So in addition to the `expectedVersion` constraints we could introduce another Read Model that can be queried from the CommandController - like we did with the `Inbox` model.
+But since the next milestone has some more advanced requirements, we'll solve that issue otherwise in this case.
 
 ## Milestone 3
 
-> * No more than two Notifications must be allowed for one Channel within 10 seconds
+> * Flood protection: Don't allow more than one Notification to be sent to a Channel within 10 seconds
 > * If a User doesn't acknowledge a Notification within 1 hour they receive a **Reminder** email
-> * Reminder emails are "debounced", so that no more than one mail per 10 Minutes is sent
+> * Reminders are aggregated, so that no more than one mail per 10 minutes is sent to one user
 
+Admittedly the first requirement is a little far-fetched. But it's a good example for an invariant that requires [:book:Immediate Consistency](Glossary.md#immediate-consistency).
+Using a Read Model to enforce a [:book:Soft Constraint](Glossary.md#soft-constraint) would not work in this case. An evil (or buggy) agent could trigger thousands of notifications before the Read Model is even up to date.
+
+One option would be to carry the Event Stream version to the Read Model und use that as `expectedVersion` (see previous section). That would allow new Channel events only once the Read Model is up-to-date.
+In systems with a low event throughput this "pessimistic locking" approach could be feasible. But the more events are handled the more likely you have an outdated Read Model. 
+
+
+### Event Sourced Aggregate
+
+```php
+<?php
+declare(strict_types=1);
+namespace Acme\Notifications;
+
+use Acme\Notifications\Events\ChannelWasAdded;
+use Acme\Notifications\Events\ChannelWasNotified;
+use Acme\Notifications\Events\UserWasSubscribedToChannel;
+use Neos\EventSourcing\AbstractEventSourcedAggregateRoot;
+use Neos\Flow\Utility\Algorithms;
+
+final class Channel extends AbstractEventSourcedAggregateRoot
+{
+    /**
+     * @var string
+     */
+    private $id;
+
+    /**
+     * @var \DateTimeInterface|null
+     */
+    private $lastNotificationTime;
+
+    public static function create(string $id, string $label): self
+    {
+        $instance = new static();
+        $instance->recordThat(new ChannelWasAdded($id, $label));
+        return $instance;
+    }
+
+    public function subscribeUser(string $userId): void
+    {
+        $this->recordThat(new UserWasSubscribedToChannel($this->id, $userId));
+    }
+
+    public function unsubscribeUser(string $userId): void
+    {
+        $this->recordThat(new UserWasSubscribedToChannel($this->id, $userId));
+    }
+
+    public function notify(string $message): void
+    {
+        $notificationId = Algorithms::generateUUID();
+        $now = new \DateTimeImmutable();
+        $this->recordThat(new ChannelWasNotified($this->id, $notificationId, $message, $now));
+    }
+
+    public function whenChannelWasAdded(ChannelWasAdded $event): void
+    {
+        $this->id = $event->getChannelId();
+    }
+}
+```
+
+
+```php
+// ...
+
+final class Channel extends AbstractEventSourcedAggregateRoot
+{
+    /**
+     * Number of seconds that must pass between a new notification can be sent to the channel
+     *
+     * @const int
+     */
+    private const MIN_DELAY_BETWEEN_NOTIFICATIONS = 10;
+
+    // ...
+
+    public function notify(string $message): void
+    {
+        $notificationId = Algorithms::generateUUID();
+        $now = new \DateTimeImmutable();
+        if ($this->lastNotificationTime !== null
+            && $now->getTimestamp() - $this->lastNotificationTime->getTimestamp() < self::MIN_DELAY_BETWEEN_NOTIFICATIONS)
+        {
+            throw new \RuntimeException(sprintf('You must wait %d seconds before a new notification can be sent to this channel', self::MIN_DELAY_BETWEEN_NOTIFICATIONS), 1570461365);
+        }
+        $this->recordThat(new ChannelWasNotified($this->id, $notificationId, $message, $now));
+    }
+
+    // ...
+
+    public function whenChannelWasNotified(ChannelWasNotified $event): void
+    {
+        $this->lastNotificationTime = $event->getTimestamp();
+    }
+}
+```
