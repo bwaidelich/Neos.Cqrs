@@ -27,7 +27,7 @@ Let's assume we have the following 3 milestones:
 
 For this tutorial we assume you have a running Flow 5.3 installation with the `neos/event-sourcing` package installed in version 2.x.
 To keep things easy, we'll put all of the code into one Flow package `Acme.Notifications`.
-You can create it using the kickstarter:
+You can create it using the `Neos.Kickstarter` package that is installed by default:
 
 ```
 ./flow kickstart:package Acme.Notifications
@@ -67,7 +67,7 @@ With the Milestones above the following [:book:Domain Events](Glossary.md#domain
 * A Notification was sent to a Channel
 * A Reminder Email was sent
 
-For a final version there would probably be more Event types (there is currently no way to *unsubscribe* users from a Channel for example). But for the sake of simplicity we stick to the six above for this tutorial.
+For a final version there would probably be more Events (there is currently no way to *unsubscribe* users from a Channel for example). But for the sake of simplicity we stick to the six above for this tutorial.
 
 ## Milestone 1
 
@@ -137,6 +137,12 @@ final class UserWasNotified implements DomainEventInterface
 }
 ```
 
+<details><summary>:information_source:<i>Note...</i></summary>
+
+> All events have a "recordedAt" metadata that tracks the timestamp at which the event was *committed* to the Event Store
+> Since we need the timestamp at which the event *occurred* originally, we add an additional DateTime property to the event itself
+</details>
+
 To test the application we create a simple `CommandController` so that we can interact with it via CLI:
 
 
@@ -198,7 +204,7 @@ Sent notification fdf70c75-daa5-46d5-8cae-a2290e290d79 to user user1.
 
 <details><summary>:information_source:<i>Note...</i></summary>
 
-> We just assume that a user with the id "user1" exists at this place. User management ist out of scope of this tutorial
+> We just assume that a user with the id "user1" exists at this point. User management ist out of scope of this tutorial
 </details>
 
 When using the default Event Store configuration, the following row should have been added to the `neos_eventsourcing_eventstore_events` database table:
@@ -211,7 +217,7 @@ When using the default Event Store configuration, the following row should have 
 ## Projection
 
 In Event-Sourced systems the application state is stored as a sequence of events.
-This state can be [:book:projected](Glossary.md#projection) into a form that is optimized for reading use cases, the so called [:book:Read Model](Glossary.md#read-model) (aka "Query Model" or "View Model").
+This state can be [:book:projected](Glossary.md#projection) into a form that is optimized for *reading*, the so called [:book:Read Model](Glossary.md#read-model) (aka "Query Model" or "View Model").
 
 For the projector we have to implement the `Neos\EventSourcing\Projection\ProjectorInterface`.
 Like any [:book:Event Listener](Glossary.md#event-listener) the events are handled by corresponding `when<EventClassName>()` methods: 
@@ -230,7 +236,7 @@ final class InboxProjector implements ProjectorInterface
 
     public function reset(): void
     {
-        // TODO: reset the projector state
+        // TODO: reset the projector state, will be invoked when the projection is replayed
     }
 
     public function whenUserWasNotified(UserWasNotified $event): void
@@ -360,7 +366,7 @@ final class InboxProjector implements ProjectorInterface
 ```
 
 From now on the `InboxProjector` will be triggered automatically whenever an event with a matching `when*()` method is committed to the Event Store.
-Additionally we can *replay*  the projection to apply events that have been published in the past:
+Additionally we can *replay* the projection to apply events that have been published in the past:
 
 
 ```

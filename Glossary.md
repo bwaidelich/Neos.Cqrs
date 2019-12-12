@@ -1,6 +1,79 @@
 # Glossary
 
 A list of Event Sourcing specific terms with a definition on how we currently understand it.
+*Note:* This list is not authoritative but merely our take and in parts greatly simplified to the implementation in this package.
+
+
+## Aggregate
+
+
+
+*Note:* Due to its name, this term occurs high up in this glossary. That shouldn't reflect the importance of this concept – we actually think that most applications work without Aggregates, embracing [Eventual Consistency](#eventual-consistency)
+
+<details><summary><b>Example</b></summary>
+
+```php
+<?php
+declare(strict_types=1);
+namespace Acme\Notifications;
+
+use Neos\EventSourcing\AbstractEventSourcedAggregateRoot;
+
+final class Channel extends AbstractEventSourcedAggregateRoot
+{
+    /**
+     * @var string
+     */
+    private $id;
+
+    /**
+     * @var \DateTimeInterface|null
+     */
+    private $lastNotificationTime;
+
+    public static function create(string $id, string $label): self
+    {
+        $instance = new static();
+        $instance->recordThat(new ChannelWasAdded($id, $label));
+        return $instance;
+    }
+
+    public function subscribeUser(string $userId): void
+    {
+        $this->recordThat(new UserWasSubscribedToChannel($this->id, $userId));
+    }
+
+    public function unsubscribeUser(string $userId): void
+    {
+        $this->recordThat(new UserWasSubscribedToChannel($this->id, $userId));
+    }
+
+    public function notify(string $message): void
+    {
+        $notificationId = Algorithms::generateUUID();
+        $now = new \DateTimeImmutable();
+        $this->recordThat(new ChannelWasNotified($this->id, $notificationId, $message, $now));
+    }
+
+    public function whenChannelWasAdded(ChannelWasAdded $event): void
+    {
+        $this->id = $event->getChannelId();
+    }
+}
+```
+</details>
+
+## Bounded Context
+
+A logical boundary between (sub) domains.
+
+The implementation of such boundary can have all kinds of characteristics.
+In the simplest form it is just a mental separation between logical parts of the application.
+On the other end of the spectrum the boundaries are enforced with completely separate development teams and software stacks.
+
+In the context of this package, a separate Bounded Context should _at least_ use a separate Event Stores (see [Readme](Readme.md#multiple-event-stores) on how to set up multiple instances)
+
+*Note:* The term "Bounded Context" originates from Domain-Driven Design and is not directly related to Event Sourcing, but since it's so important, we decided to include it in this list.
 
 ## Causation Identifier
 
@@ -26,6 +99,15 @@ public function whenOrderWasFinalized(OrderWasFinalized $event, RawEvent $rawEve
 ```
 </details>
 
+## Concurrency
+
+The fact of two or more computations are happening at the same time.
+
+In the context of this package "same time" can actually mean seconds or even minutes apart:
+For example if a user updates data via some Web form and the underlying resource has been changed from another user in the meantime.
+In classic applications the default behavior in such cases is usually "last in wins" such that previous changes might be overridden by the second update.
+
+
 ## Correlation Identifier
 
 An optional identifier that can be assigned to events to _correlate_ them with 
@@ -49,9 +131,16 @@ public function whenOrderWasFinalized(OrderWasFinalized $event): void
 ```
 </details>
 
+## CQRS
+
+stands for "Command Query Responsibility Segregation" and represents the pattern to use a different model to _update_ information than the model you use to
+_read_ information.
+See [Write Model](#write-model) & [Read Model](#read-model)
+
 ## Domain Event
 
 According to Martin Fowler a _Domain Event_ "captures the memory of something interesting which affects the domain"<sup id="a1">[1](#f1)</sup>.
+
 Whether something is "interesting" might be a matter of discussions of course. But it should be clear that this is about incidents that happened in the domain logic rather than technical things (like mouse events in Javascript) – unless they are part
 of the domain of course.
 
@@ -169,10 +258,56 @@ $eventWithId = DecoratedEvent::addIdentifier($domainEvent, 'some-id');
 
 See [Event Correlation](#event-correlation)
 
+## Event Listener
+
+A piece of code that is invoked whenever a corresponding [Domain Event](#domain-event) is dispatched.
+In this package Event Listeners are all classes that implement the `Neos\EventSourcing\EventListener\EventListenerInterface` interface.
+Every listener needs at least one `when*()` method that...
+* ...is public
+* ...is not static
+* ...expects an instance of the corresponding Domain Event as first argument
+* ...optionally expects an instance of `RawEvent` as second argument
+* ...is called `when<EventClassName>`
+* ...has no return type
+
+<details><summary><b>Example</b></summary>
+
+```php
+<?php
+namespace Some\Package;
+
+use Neos\EventSourcing\EventListener\EventListenerInterface;
+use Neos\EventSourcing\EventStore\RawEvent;
+use Some\Package\SomethingHasHappened;
+use Some\Package\SomethingElseHasHappened;
+
+class SomeEventListener implements EventListenerInterface
+{
+
+    public function whenSomethingHasHappened(SomethingHasHappened $event): void
+    {
+        // do something with the $event
+    }
+
+    public function whenSomethingElseHasHappened(SomethingElseHasHappened $event, RawEvent $rawEvent): void
+    {
+        // do something with the $event and/or $rawEvent
+    }
+
+}
+```
+</details>
+
+
+Special types of Event Listeners are [Projectors](#projection) and [Process Managers](#process-manager).
+
 ## Event Store
 
 The Event Store provides an API to load and persist Domain Events.
-Unlike other databases it only ever *appends* events to streams, they are never *updated* or *deleted*.
+Unlike other databases it only ever *appends* events to [streams](#event-store-streams), they are never *updated* or *deleted*.
+
+This package comes with a `default` Event Store pre-configured that (by default) uses the `DoctrineEventStorage` to store events in a database table.
+Additional Event Store instances can be configured, see [Readme](Readme.md#multiple-event-stores).
 
 ## Event Store Streams
 
@@ -190,6 +325,73 @@ The following virtual streams are currently supported:
 * `StreamName::forCorrelationId('some-correlation-id')` will load events with the given [Correlation Identifier](#correlation-identifier)
 
 The events are always sorted by their global `sequenceNumber` so that the ordering is deterministic.
+
+## Eventual Consistency
+
+TODO
+
+## Hard Constraint
+
+TODO
+
+## Immediate Consistency
+
+See [Strong Consistency](#strong-consistency)
+
+## Process Manager
+
+TODO
+
+## Projection
+
+TODO
+
+## Query Model
+
+See [Read Model](#read-model)
+
+## Read Model
+
+aka "Query Model" or "View Model".
+
+A model that is optimized for reading performance.
+
+In the context of this package this is typically implemented with a database table that is updated via [Projections](#projection).
+But it could also be an Elastic Search index or some files in the file system to name a few.
+
+In order to keep Write performance fast and reliable, the Read Model is usually updated [asynchronously](#eventual-consistency).
+
+## Soft Constraint
+
+An invariant that can fail if the corresponding model is [not consistent yet](#eventual-consistency).
+Usually it is a check that is performed against the [Read Model](#read-model) 
+See also [Hard Constraints](#hard-constraint) 
+
+## Strong Consistency
+
+aka "Immediate Consistency".
+
+<details><summary><b>Example</b></summary>
+
+The following SQL statement updates the user row with ID 1 only if it still has the expected version (15 in this case):
+
+```sql
+UPDATE users SET name = "New Name", version = version + 1 WHERE id = 1 AND version = 15
+```
+
+If a similar query had modified the user in the meantime this query would not update the row.
+
+</details>
+
+
+## View Model
+
+See [Read Model](#read-model)
+
+## Write Model
+
+A model that is optimized for writing performance used to enforce [Hard Constraints](#hard-constraint).
+
 
 ---
 

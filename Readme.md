@@ -141,6 +141,98 @@ class SomeEventListener implements EventListenerInterface
 
 The `when*()` methods of classes implementing the `EventListenerInterface` will be invoked whenever a corresponding event is committed to the Event Store.
 
+## Multiple Event Stores
+
+This packages comes with the `default` Event Store already pre-configured (see [Settings.yaml](Configuration/Settings.yaml)).
+By default the default configuration will be applied when injecting an instance of the `EventStore`:
+
+```php
+<?php
+namespace Some\Package;
+
+use Neos\Flow\Annotations as Flow;
+use Neos\EventSourcing\EventStore\EventStore;
+
+class SomeClass
+{
+    /**
+     * @Flow\Inject
+     * @var EventStore
+     */
+    protected $eventStore;
+}
+```
+
+When using multiple Event-Sourced applications within one installation (or when a single application grows so that it can be split up into multiple [Bounded Contexts](Glossary.md#bounded-context)), separate Event Store instances should be used.
+For this the `EventStoreFactory` can be used in order to retrieve an instance by the configured Event Store Identifier.
+Better yet: Use an `Objects.yaml` configuration to change the event store for a given class.
+
+For example:
+ 
+```yaml
+Some\Package\SomeClass:
+  properties:
+    'eventStore':
+      object:
+        factoryObjectName: Neos\EventSourcing\EventStore\EventStoreFactory
+        arguments:
+          1:
+            value: 'some-other-eventstore'
+```
+
+With that in place, the Event Store instance with the specified identifier will be injected instead of the `default` one.
+
+This can also be used to inject multiple different Event Store instances to the same class (this time using constructor injection):
+
+```yaml
+Some\Package\SomeClass:
+  arguments:
+    1:
+      object:
+        factoryObjectName: Neos\EventSourcing\EventStore\EventStoreFactory
+        arguments:
+          1:
+            value: 'some-eventstore'
+    2:
+      object:
+        factoryObjectName: Neos\EventSourcing\EventStore\EventStoreFactory
+        arguments:
+          1:
+            value: 'some-other-eventstore'
+```
+
+And the corresponding class:
+
+```php
+<?php
+namespace Some\Package;
+
+class SomeClass
+{
+    public __construct(EventStore $someEventStore, EventStore $someOtherEventStore)
+    {
+        // ...
+    }
+}
+```
+
+<details>
+<summary>:information_source: Note:</summary>
+When a custom Event Store is needed in a lot of places, the `Objects.yaml` configuration can grow.
+In that case the default implementation can be changed:
+
+```yaml
+Neos\EventSourcing\EventStore\EventStore:
+  arguments:
+    1:
+      value: 'our-default-eventstore'
+```
+
+*Important:* This might require additional configuration of 3rd party packages that rely on the default behavior
+
+An alternative could be a custom implementation that acts as Facade to the actual Event Store and is configured accordingly (or uses the `EventStoreFactory` internally)
+</details>
+
 ## Tutorial
 
 ...to be written.
